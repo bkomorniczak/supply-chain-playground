@@ -1,0 +1,46 @@
+# macOS cruft
+.DS_Store
+Thumbs.db
+
+# Editor settings
+.vscode/
+.idea/
+
+# Go build artifacts
+/app/server
+/bin/
+/build/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.pprof
+*.prof
+*.coverprofile
+*.log
+
+# Python tooling caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage*
+
+# Virtual environments
+.env
+.env.*
+.venv/
+venv/
+env/
+.envrc
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+/.tmp/
+/.cache/
