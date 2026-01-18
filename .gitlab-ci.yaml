@@ -1,21 +1,89 @@
-stages: [test, build]
+stages:
+  - test
+  - build
+  - smoke
+  - sentinel
 
 variables:
-  DOCKER_DRIVER: overlay2
+  # Required for docker:dind on GitLab shared runners.
   DOCKER_TLS_CERTDIR: ""
+  DOCKER_DRIVER: overlay2
+  DOCKER_BUILDKIT: "1"
 
-test:
+  # Image naming for the local build inside CI.
+  IMAGE_NAME: "ci-supplychain-playground"
+  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+
+test:go:
   stage: test
   image: golang:1.22.6-bookworm
   script:
     - cd app
     - go test ./...
 
-docker_build:
+build:docker:
   stage: build
   image: docker:27
   services:
     - name: docker:27-dind
       command: ["--tls=false"]
   script:
-    - docker build -f docker/Dockerfile --build-arg COMMIT="$CI_COMMIT_SHORT_SHA" --build-arg BUILD_TIME="$CI_PIPELINE_CREATED_AT" -t ci-supplychain-playground:$CI_COMMIT_SHORT_SHA .
+    - docker version
+    - docker build
+        -f docker/Dockerfile
+        --build-arg COMMIT="$CI_COMMIT_SHORT_SHA"
+        --build-arg BUILD_TIME="$CI_PIPELINE_CREATED_AT"
+        -t "$IMAGE_NAME:$IMAGE_TAG"
+        .
+  artifacts:
+    when: always
+    expire_in: 1 week
+    reports:
+      dotenv: build.env
+  after_script:
+    # Export variables for later jobs (dotenv artifact).
+    - echo "IMAGE_REF=$IMAGE_NAME:$IMAGE_TAG" > build.env
+
+smoke:container:
+  stage: smoke
+  image: docker:27
+  services:
+    - name: docker:27-dind
+      command: ["--tls=false"]
+  needs:
+    - job: build:docker
+      artifacts: true
+  script:
+    - docker buildx version || true
+    # Rebuild is simplest on shared runners because images aren't shared between jobs.
+    # (Yes, this is annoying. Welcome to CI.)
+    - docker build
+        -f docker/Dockerfile
+        --build-arg COMMIT="$CI_COMMIT_SHORT_SHA"
+        --build-arg BUILD_TIME="$CI_PIPELINE_CREATED_AT"
+        -t "$IMAGE_NAME:$IMAGE_TAG"
+        .
+    - docker run -d --rm --name app -p 8080:8080 -e PORT=8080 "$IMAGE_NAME:$IMAGE_TAG"
+    - |
+      # Wait for health (max ~20s)
+      for i in $(seq 1 20); do
+        if wget -qO- http://localhost:8080/healthz >/dev/null 2>&1; then
+          echo "healthy"
+          break
+        fi
+        sleep 1
+      done
+    - wget -qO- http://localhost:8080/healthz
+    - wget -qO- http://localhost:8080/version
+    - wget -qO- "http://localhost:8080/echo?msg=hello"
+  after_script:
+    - docker logs app || true
+    - docker stop app || true
+
+sentinel:placeholder:
+  stage: sentinel
+  image: alpine:3.20
+  needs: []
+  script:
+    - echo "TODO: run Sentinel here (scan repo + CI config + Dockerfile diffs)"
+    - echo "This job is intentionally a placeholder so the stage exists."
